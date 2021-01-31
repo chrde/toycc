@@ -20,31 +20,80 @@ impl<'a> Tokenizer<'a> {
             self.digit();
             self.punctuator();
         }
-        self.tokens.push(Token {
-            start: self.pos,
-            end: self.pos + 1,
-            kind: TokenKind::Eof,
-        });
+        self.tokens.reverse();
         self.tokens
+    }
+
+    pub fn push_token(&mut self, kind: TokenKind) {
+        let t = Token {
+            start: self.pos,
+            end: kind.len(),
+            kind,
+        };
+        self.tokens.push(t);
     }
 
     fn punctuator(&mut self) {
         match self.peek() {
+            Some('>') => {
+                self.advance();
+                if self.peek() == Some('=') {
+                    self.advance();
+                    self.push_token(TokenKind::GreaterEqual);
+                } else {
+                    self.push_token(TokenKind::Greater);
+                }
+            }
+            Some('<') => {
+                self.advance();
+                if self.peek() == Some('=') {
+                    self.advance();
+                    self.push_token(TokenKind::LowerEqual);
+                } else {
+                    self.push_token(TokenKind::Lower);
+                }
+            }
+            Some('!') => {
+                self.advance();
+                if self.peek() == Some('=') {
+                    self.advance();
+                    self.push_token(TokenKind::NotEqual);
+                } else {
+                    self.push_token(TokenKind::Not);
+                }
+            }
+            Some('=') => {
+                self.advance();
+                if self.peek() == Some('=') {
+                    self.advance();
+                    self.push_token(TokenKind::EqualEqual);
+                } else {
+                    self.push_token(TokenKind::Equal);
+                }
+            }
             Some('+') => {
                 self.advance();
-                self.tokens.push(Token {
-                    start: self.pos,
-                    end: self.pos + 1,
-                    kind: TokenKind::Punctuator(Punctuator::Plus),
-                });
+                self.push_token(TokenKind::Plus);
             }
             Some('-') => {
                 self.advance();
-                self.tokens.push(Token {
-                    start: self.pos,
-                    end: self.pos + 1,
-                    kind: TokenKind::Punctuator(Punctuator::Minus),
-                });
+                self.push_token(TokenKind::Minus)
+            }
+            Some('*') => {
+                self.advance();
+                self.push_token(TokenKind::Star);
+            }
+            Some('/') => {
+                self.advance();
+                self.push_token(TokenKind::Slash);
+            }
+            Some(')') => {
+                self.advance();
+                self.push_token(TokenKind::RightParen);
+            }
+            Some('(') => {
+                self.advance();
+                self.push_token(TokenKind::LeftParen);
             }
             _ => {}
         }
@@ -82,7 +131,7 @@ impl<'a> Tokenizer<'a> {
             self.advance();
         }
         if start != self.pos {
-            let val: isize = self.token_from(start).parse().unwrap();
+            let val: usize = self.token_from(start).parse().unwrap();
             let token = Token {
                 start,
                 end: self.pos,
@@ -93,21 +142,58 @@ impl<'a> Tokenizer<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TokenKind {
-    Reserved,
-    Num(isize),
-    Punctuator(Punctuator),
+    // Reserved,
+    Num(usize),
+    LeftParen,
+    Star,
+    Slash,
+    Plus,
+    Minus,
+    RightParen,
+    Equal,
+    EqualEqual,
+    Not,
+    NotEqual,
+    Lower,
+    Greater,
+    LowerEqual,
+    GreaterEqual,
     Eof,
 }
 
-#[derive(Clone, Debug)]
-pub enum Punctuator {
-    Plus,
-    Minus,
+impl TokenKind {
+    fn len(&self) -> usize {
+        use TokenKind::*;
+        match self {
+            EqualEqual | LowerEqual | GreaterEqual => 2,
+            Num(_) => unreachable!(),
+            Eof => 0,
+            _ => 1,
+        }
+    }
 }
 
-#[derive(Clone, Debug)]
+impl TokenKind {
+    pub fn binary(&self) -> bool {
+        use TokenKind::*;
+        matches!(
+            self,
+            Star | Slash
+                | Plus
+                | Minus
+                | EqualEqual
+                | NotEqual
+                | Lower
+                | Greater
+                | LowerEqual
+                | GreaterEqual
+        )
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 pub struct Token {
     pub start: usize,
     pub end: usize,

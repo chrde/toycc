@@ -1,7 +1,12 @@
-use std::fmt::{self};
+use codegen::Assembly;
+use parser::Parser;
+use parser::{Node, NodeId};
+use std::fmt;
 use thiserror::Error;
-use tokenizer::*;
+use tokenizer::Tokenizer;
 
+mod codegen;
+mod parser;
 mod tokenizer;
 
 #[derive(Error, Debug)]
@@ -10,16 +15,16 @@ pub enum ErrorKind {
     Generic(String),
 }
 
-pub struct Error<'a> {
+pub struct Error {
     kind: ErrorKind,
-    span: Option<Span<'a>>,
+    span: Option<Span>,
 }
 
-impl fmt::Display for Error<'_> {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.kind)?;
         if let Some(span) = &self.span {
-            write!(f, "\n{}\n", span.code)?;
+            // write!(f, "\n{}\n", span.code)?;
             write!(f, "{:>width$}", "^", width = span.pos)?;
         }
         Ok(())
@@ -32,117 +37,53 @@ impl From<fmt::Error> for ErrorKind {
     }
 }
 
-pub struct Assembly {
-    content: String,
-}
-
-pub struct Span<'a> {
+pub struct Span {
     pos: usize,
-    code: &'a str,
 }
 
-impl<'a> Span<'a> {
-    pub fn new(code: &'a str, pos: usize) -> Self {
-        Self { pos, code }
+impl Span {
+    pub fn new(pos: usize) -> Self {
+        Self { pos }
     }
 }
 
-impl fmt::Display for Assembly {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.content)
-    }
+#[derive(Clone, Debug)]
+pub struct NodeArena {
+    nodes: Vec<Node>,
 }
 
-impl Assembly {
+impl NodeArena {
     pub fn new() -> Self {
-        Self {
-            content: String::new(),
-        }
+        Self { nodes: vec![] }
     }
 
-    pub fn write(&mut self, s: impl ToString) {
-        self.content.push_str(&s.to_string())
+    pub fn push(&mut self, node: Node) -> NodeId {
+        let id = self.nodes.len();
+        self.nodes.push(node);
+        NodeId(id)
+    }
+
+    pub fn get(&self, node: NodeId) -> Node {
+        self.nodes[node.0]
     }
 }
 
-pub fn run<'a>(code: &'a str) -> Result<Assembly, Error<'a>> {
+pub fn run<'a>(code: &'a str) -> Result<String, Error> {
     let t = Tokenizer::new(code);
     let tokens = t.run();
-    let mut parser = Parser::new(code, tokens);
+    let mut arena = NodeArena::new();
+    let mut parser = Parser::new(code, tokens, &mut arena);
 
+    let expr = parser.expression(0)?;
+    //assert parser is at EOF
+
+    // dbg!(&arena);
     let mut assembly = Assembly::new();
-    assembly.write("  .globl main\n");
-    assembly.write("main:\n");
+    assembly.writeln("  .globl main");
+    assembly.writeln("main:");
+    assembly.gen_expr(expr, &arena);
 
-    assembly.write(format!("  mov ${}, %rax\n", parser.number()?));
-    while let Some(t) = parser.next() {
-        match t.kind {
-            TokenKind::Eof => break,
-            TokenKind::Punctuator(Punctuator::Plus) => {
-                let number = parser.number()?;
-                assembly.write(format!("  add ${}, %rax\n", number));
-            }
-            TokenKind::Punctuator(Punctuator::Minus) => {
-                let number = parser.number()?;
-                assembly.write(format!("  sub ${}, %rax\n", number));
-            }
-            _ => {
-                return Err(Error {
-                    kind: ErrorKind::Generic(format!("{:?}", t)),
-                    span: None,
-                })
-            }
-        }
-    }
-    assembly.write("  ret");
+    assembly.writeln("  ret");
 
-    Ok(assembly)
-}
-
-fn error_at(span: Option<Span>, msg: impl ToString) -> Error {
-    Error {
-        kind: ErrorKind::Generic(msg.to_string()),
-        span,
-    }
-}
-
-struct Parser<'a> {
-    tokens: Vec<Token>,
-    code: &'a str,
-    cur: usize,
-}
-
-impl<'a> Parser<'a> {
-    fn new(code: &'a str, tokens: Vec<Token>) -> Self {
-        Self {
-            code,
-            tokens,
-            cur: 0,
-        }
-    }
-
-    fn next(&mut self) -> Option<&Token> {
-        let result = self.tokens.get(self.cur);
-        self.cur += 1;
-        result
-    }
-
-    fn span(&self) -> Option<Span<'a>> {
-        if let Some(t) = self.tokens.get(self.cur) {
-            Some(Span::new(self.code, t.end))
-        } else {
-            None
-        }
-    }
-
-    fn number(&mut self) -> Result<isize, Error<'a>> {
-        let token = self.tokens.get(self.cur).expect("No more tokens");
-        match token.kind {
-            TokenKind::Num(val) => {
-                self.cur += 1;
-                Ok(val)
-            }
-            _ => Err(error_at(self.span(), "expected number")),
-        }
-    }
+    Ok(assembly.finish())
 }
