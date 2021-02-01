@@ -147,11 +147,10 @@ impl<'a> Tokenizer<'a> {
             }
         }
         if start != self.pos {
-            let ident = self.token_from(start).to_string();
             let token = Token {
                 start,
                 end: self.pos,
-                kind: TokenKind::Ident(ident),
+                kind: identifier(self.token_from(start)),
             };
             self.tokens.push(token)
         }
@@ -174,9 +173,16 @@ impl<'a> Tokenizer<'a> {
     }
 }
 
+fn identifier(ident: &str) -> TokenKind {
+    use TokenKind::*;
+    match ident {
+        "return" => Return,
+        i => Ident(i.to_string()),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenKind {
-    // Reserved,
     Num(usize),
     Ident(String),
     LeftParen,
@@ -195,6 +201,9 @@ pub enum TokenKind {
     GreaterEqual,
     Semicolon,
     Eof,
+
+    // Reserved words,
+    Return,
 }
 
 impl TokenKind {

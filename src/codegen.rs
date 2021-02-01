@@ -47,11 +47,18 @@ impl<'a> Assembly<'a> {
         self.writeln("  push %rbp");
         self.writeln("  mov %rsp, %rbp");
         writeln!(self.content, "  sub ${}, %rsp", self.func.stack_size()).unwrap();
-        for stmt in self.func.statements() {
-            assert_eq!(&NodeKind::Statement, stmt.kind());
-            self.gen_expr(stmt.lhs())
+        for stmt in self.func.body() {
+            match stmt.kind() {
+                NodeKind::Statement => self.gen_expr(stmt.lhs()),
+                NodeKind::Return => {
+                    self.gen_expr(stmt.lhs());
+                    self.writeln("  jmp .L.return");
+                }
+                k => unreachable!("{:?}", k),
+            }
         }
 
+        self.writeln(".L.return:");
         self.writeln("  mov %rbp, %rsp");
         self.writeln("  pop %rbp");
 

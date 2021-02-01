@@ -140,17 +140,26 @@ impl<'a> Parser<'a> {
     }
 
     fn statement(&mut self) -> Result<NodeId, Error> {
-        let id = self.expr()?;
-        self.consume(TokenKind::Semicolon);
-        Ok(id)
+        match self.peek().kind {
+            TokenKind::Return => {
+                self.consume(TokenKind::Return);
+                let lhs = self.expr()?;
+                self.consume(TokenKind::Semicolon);
+                let node = Node::unary(NodeKind::Return, lhs);
+                Ok(self.arena.push(node))
+            }
+            _ => {
+                let lhs = self.expr()?;
+                self.consume(TokenKind::Semicolon);
+                let node = Node::unary(NodeKind::Statement, lhs);
+                Ok(self.arena.push(node))
+            }
+        }
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
-        let mut body = vec![];
         while self.peek().kind != TokenKind::Eof {
-            let node = self.statement()?;
-            let id = self.arena.push(Node::unary(NodeKind::Statement, node));
-            body.push(id);
+            let _ = self.statement()?;
         }
 
         Ok(())
@@ -191,6 +200,8 @@ fn infix_binding_power(t: &TokenKind) -> Option<(u8, u8)> {
 pub enum NodeKind {
     Statement,
     Assignment,
+
+    Return,
 
     // expr
     Add,
@@ -240,16 +251,16 @@ impl PartialEq for Local {
 
 #[derive(Clone, Debug)]
 pub struct Function {
-    statements: Vec<Node>,
+    body: Vec<Node>,
     nodes: Vec<Node>,
     locals: Vec<Local>,
     stack_size: usize,
 }
 
 impl Function {
-    pub fn new(statements: Vec<Node>, nodes: Vec<Node>, locals: Vec<Local>) -> Self {
+    pub fn new(body: Vec<Node>, nodes: Vec<Node>, locals: Vec<Local>) -> Self {
         let mut result = Self {
-            statements,
+            body,
             nodes,
             locals,
             stack_size: 0,
@@ -262,8 +273,8 @@ impl Function {
         self.stack_size
     }
 
-    pub fn statements(&self) -> &[Node] {
-        &self.statements
+    pub fn body(&self) -> &[Node] {
+        &self.body
     }
 
     pub fn node(&self, id: NodeId) -> &Node {

@@ -63,7 +63,6 @@ impl NodeArena {
         let id = match self.locals.iter().position(|x| x.name() == &name) {
             Some(x) => x,
             None => {
-                // TODO(chrde): offset
                 self.locals.push(Local::new(name));
                 self.locals.len() - 1
             }
@@ -80,12 +79,15 @@ impl NodeArena {
     }
 
     pub fn push(&mut self, node: Node) -> NodeId {
-        if node.kind() == &NodeKind::Statement {
-            self.statements.push(node);
-            NodeId(self.statements.len() - 1)
-        } else {
-            self.nodes.push(node);
-            NodeId(self.nodes.len() - 1)
+        match node.kind() {
+            NodeKind::Statement | NodeKind::Return => {
+                self.statements.push(node);
+                NodeId(self.statements.len() - 1)
+            }
+            _ => {
+                self.nodes.push(node);
+                NodeId(self.nodes.len() - 1)
+            }
         }
     }
 
