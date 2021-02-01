@@ -19,6 +19,7 @@ impl<'a> Tokenizer<'a> {
             self.whitespace();
             self.digit();
             self.punctuator();
+            self.ident();
         }
         self.tokens.reverse();
         self.tokens
@@ -35,6 +36,10 @@ impl<'a> Tokenizer<'a> {
 
     fn punctuator(&mut self) {
         match self.peek() {
+            Some(';') => {
+                self.advance();
+                self.push_token(TokenKind::Semicolon)
+            }
             Some('>') => {
                 self.advance();
                 if self.peek() == Some('=') {
@@ -125,6 +130,33 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    fn ident(&mut self) {
+        let start = self.pos;
+        if self
+            .peek()
+            .map(|c| c.is_ascii_alphabetic() || c == '_')
+            .unwrap_or(false)
+        {
+            self.advance();
+            while self
+                .peek()
+                .map(|c| c.is_ascii_alphanumeric() || c == '_')
+                .unwrap_or(false)
+            {
+                self.advance();
+            }
+        }
+        if start != self.pos {
+            let ident = self.token_from(start).to_string();
+            let token = Token {
+                start,
+                end: self.pos,
+                kind: TokenKind::Ident(ident),
+            };
+            self.tokens.push(token)
+        }
+    }
+
     fn digit(&mut self) {
         let start = self.pos;
         while self.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
@@ -142,10 +174,11 @@ impl<'a> Tokenizer<'a> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TokenKind {
     // Reserved,
     Num(usize),
+    Ident(String),
     LeftParen,
     Star,
     Slash,
@@ -160,6 +193,7 @@ pub enum TokenKind {
     Greater,
     LowerEqual,
     GreaterEqual,
+    Semicolon,
     Eof,
 }
 
@@ -193,7 +227,7 @@ impl TokenKind {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub start: usize,
     pub end: usize,

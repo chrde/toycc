@@ -1,7 +1,7 @@
 use codegen::Assembly;
-use parser::Parser;
-use parser::{Node, NodeId};
-use std::fmt;
+use parser::{Function, Local, Node, NodeId};
+use parser::{NodeKind, Parser};
+use std::{fmt, mem};
 use thiserror::Error;
 use tokenizer::Tokenizer;
 
@@ -47,24 +47,54 @@ impl Span {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NodeArena {
     nodes: Vec<Node>,
+    statements: Vec<Node>,
+    locals: Vec<Local>,
 }
 
 impl NodeArena {
     pub fn new() -> Self {
-        Self { nodes: vec![] }
+        Self::default()
     }
 
-    pub fn push(&mut self, node: Node) -> NodeId {
-        let id = self.nodes.len();
-        self.nodes.push(node);
+    pub fn push_local(&mut self, name: String) -> NodeId {
+        let id = match self.locals.iter().position(|x| x.name() == &name) {
+            Some(x) => x,
+            None => {
+                // TODO(chrde): offset
+                self.locals.push(Local::new(name));
+                self.locals.len() - 1
+            }
+        };
         NodeId(id)
     }
 
-    pub fn get(&self, node: NodeId) -> Node {
-        self.nodes[node.0]
+    pub fn into_function(&mut self) -> Function {
+        Function::new(
+            mem::take(&mut self.statements),
+            mem::take(&mut self.nodes),
+            mem::take(&mut self.locals),
+        )
+    }
+
+    pub fn push(&mut self, node: Node) -> NodeId {
+        if node.kind() == &NodeKind::Statement {
+            self.statements.push(node);
+            NodeId(self.statements.len() - 1)
+        } else {
+            self.nodes.push(node);
+            NodeId(self.nodes.len() - 1)
+        }
+    }
+
+    pub fn get(&self, node: NodeId) -> &Node {
+        &self.nodes[node.0]
+    }
+
+    pub fn statements(&self) -> &[Node] {
+        &self.statements
     }
 }
 
@@ -74,16 +104,13 @@ pub fn run<'a>(code: &'a str) -> Result<String, Error> {
     let mut arena = NodeArena::new();
     let mut parser = Parser::new(code, tokens, &mut arena);
 
-    let expr = parser.expression(0)?;
+    parser.run()?;
     //assert parser is at EOF
 
     // dbg!(&arena);
-    let mut assembly = Assembly::new();
-    assembly.writeln("  .globl main");
-    assembly.writeln("main:");
-    assembly.gen_expr(expr, &arena);
-
-    assembly.writeln("  ret");
+    let func = arena.into_function();
+    let mut assembly = Assembly::new(&func);
+    assembly.gen();
 
     Ok(assembly.finish())
 }
