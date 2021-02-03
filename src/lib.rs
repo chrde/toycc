@@ -1,5 +1,5 @@
 use codegen::Assembly;
-use parser::{Function, Local, Node, NodeId};
+use parser::{Function, Local, Node, NodeId, SuperNode};
 use parser::{NodeKind, Parser};
 use std::{fmt, mem};
 use thiserror::Error;
@@ -52,6 +52,7 @@ pub struct NodeArena {
     nodes: Vec<Node>,
     statements: Vec<Node>,
     locals: Vec<Local>,
+    groups: Vec<Vec<SuperNode>>
 }
 
 impl NodeArena {
@@ -106,13 +107,15 @@ pub fn run<'a>(code: &'a str) -> Result<String, Error> {
     let mut arena = NodeArena::new();
     let mut parser = Parser::new(code, tokens, &mut arena);
 
-    parser.run()?;
+    let program = parser.run()?;
     //assert parser is at EOF
 
+    let result = format!("{:#?}", program);
+    Ok(result)
     // dbg!(&arena);
-    let func = arena.into_function();
-    let mut assembly = Assembly::new(&func);
-    assembly.gen();
+    // let func = arena.into_function();
+    // let mut assembly = Assembly::new(&func);
+    // assembly.gen();
 
-    Ok(assembly.finish())
+    // Ok(assembly.finish())
 }

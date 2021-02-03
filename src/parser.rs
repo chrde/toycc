@@ -44,7 +44,7 @@ impl<'a> Parser<'a> {
         next
     }
 
-    fn binary(&mut self, lhs: NodeId, min_bp: u8) -> Result<NodeId, Error> {
+    fn binary(&mut self, lhs: ExprStmt, min_bp: u8) -> Result<ExprStmt, Error> {
         let kind = match self.consume_binary().kind {
             TokenKind::Lower => NodeKind::LowerCmp,
             TokenKind::LowerEqual => NodeKind::LowerEqCmp,
@@ -59,48 +59,49 @@ impl<'a> Parser<'a> {
             k => unimplemented!("{:?}", k),
         };
         let rhs = self.expression(min_bp)?;
-        Ok(self.arena.push(Node::binary(kind, lhs, rhs)))
+        Ok(ExprStmt::Binary(BinaryNode { kind, lhs: Box::new(lhs), rhs: Box::new(rhs) }))
     }
 
     // parens
-    fn grouping(&mut self) -> Result<NodeId, Error> {
+    fn grouping(&mut self) -> Result<ExprStmt, Error> {
         self.consume(TokenKind::LeftParen);
         let expr = self.expression(0)?;
         self.consume(TokenKind::RightParen);
         Ok(expr)
     }
 
-    fn primary(&mut self) -> Result<NodeId, Error> {
+    fn primary(&mut self) -> Result<ExprStmt, Error> {
         let t = self.next();
         match t.kind {
-            TokenKind::Num(val) => Ok(self.arena.push(Node::num(val))),
+            TokenKind::Num(val) => Ok(ExprStmt::Primary(Unary::Num(val))),
             TokenKind::Ident(val) => {
-                let id = self.arena.push_local(val);
-                Ok(self.arena.push(Node::ident(id)))
+                Ok(ExprStmt::Primary(Unary::Ident(val)))
+                // let id = self.arena.push_local(val);
+                // Ok(self.arena.push(Node::ident(id)))
             }
             k => unimplemented!("{:?}", k),
         }
     }
 
     // unary
-    fn unary(&mut self) -> Result<NodeId, Error> {
+    fn unary(&mut self) -> Result<UnaryNode, Error> {
         let t = self.next();
         let ((), r_bp) = prefix_binding_power(&t.kind);
         let lhs = self.expression(r_bp)?;
         let id = match &t.kind {
-            TokenKind::Plus => lhs,
-            TokenKind::Minus => self.arena.push(Node::unary(NodeKind::Neg, lhs)),
+            TokenKind::Plus => UnaryNode { kind: NodeKind::NoOp, lhs: Unary::Expr(Box::new(lhs)) },
+            TokenKind::Minus => UnaryNode { kind: NodeKind::Neg, lhs: Unary::Expr(Box::new(lhs)) },
             k => unimplemented!("{:?}", k),
         };
         Ok(id)
     }
 
-    pub fn expression(&mut self, min_bp: u8) -> Result<NodeId, Error> {
+    pub fn expression(&mut self, min_bp: u8) -> Result<ExprStmt, Error> {
         use crate::tokenizer::TokenKind::*;
         let mut lhs = match self.peek().kind {
             Num(_) | Ident(_) => self.primary()?,
             LeftParen => self.grouping()?,
-            Plus | Minus => self.unary()?,
+            Plus | Minus => ExprStmt::Unary(self.unary()?),
             k => unimplemented!("{:?}", k),
         };
 
@@ -123,46 +124,55 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn assignment(&mut self) -> Result<NodeId, Error> {
+    fn assignment(&mut self) -> Result<ExprStmt, Error> {
         let mut lhs = self.expression(0)?;
         while self.peek().kind == TokenKind::Equal {
             self.consume(TokenKind::Equal);
-            let node = Node::binary(NodeKind::Assignment, lhs, self.assignment()?);
-            lhs = self.arena.push(node);
+            lhs = ExprStmt::Binary(BinaryNode { kind: NodeKind::Assignment, lhs: Box::new(lhs), rhs: Box::new(self.assignment()?) })
         }
         Ok(lhs)
     }
 
     // TODO(chrde): rename this
-    fn expr(&mut self) -> Result<NodeId, Error> {
+    fn expr(&mut self) -> Result<ExprStmt, Error> {
         let id = self.assignment()?;
         Ok(id)
     }
 
-    fn statement(&mut self) -> Result<NodeId, Error> {
+    fn statement(&mut self) -> Result<Statement, Error> {
         match self.peek().kind {
             TokenKind::Return => {
                 self.consume(TokenKind::Return);
                 let lhs = self.expr()?;
                 self.consume(TokenKind::Semicolon);
-                let node = Node::unary(NodeKind::Return, lhs);
-                Ok(self.arena.push(node))
+                // let node = Node::unary(NodeKind::Return, lhs);
+                Ok(Statement::Return(ReturnStmt { lhs }))
+            }
+            TokenKind::LeftCurly => {
+                let mut stmts = vec![];
+                self.consume(TokenKind::LeftCurly);
+                while self.peek().kind != TokenKind::RightCurly {
+                    stmts.push(self.statement()?);
+                }
+                self.consume(TokenKind::RightCurly);
+                Ok(Statement::Block(BlockNode { stmts }))
             }
             _ => {
-                let lhs = self.expr()?;
+                let expr = self.expr()?;
                 self.consume(TokenKind::Semicolon);
-                let node = Node::unary(NodeKind::Statement, lhs);
-                Ok(self.arena.push(node))
+                Ok(Statement::Expr(expr))
             }
         }
     }
 
-    pub fn run(&mut self) -> Result<(), Error> {
+    pub fn run(&mut self) -> Result<Program, Error> {
+        let mut program = Program::default();
         while self.peek().kind != TokenKind::Eof {
-            let _ = self.statement()?;
+            let statement = self.statement()?;
+            program.stmts.push(statement);
         }
 
-        Ok(())
+        Ok(program)
     }
 }
 
@@ -200,10 +210,12 @@ fn infix_binding_power(t: &TokenKind) -> Option<(u8, u8)> {
 pub enum NodeKind {
     Statement,
     Assignment,
+    Block,
 
     Return,
 
     // expr
+    NoOp,
     Add,
     Sub,
     Mul,
@@ -219,6 +231,98 @@ pub enum NodeKind {
     // identifiers
     Num(usize),
     Ident(NodeId),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Program {
+    stmts: Vec<Statement>
+}
+
+#[derive(Clone, Debug)]
+pub enum Statement {
+    Expr(ExprStmt),
+    Return(ReturnStmt),
+    Block(BlockNode),
+}
+
+#[derive(Clone, Debug)]
+pub struct ReturnStmt {
+    pub lhs: ExprStmt,
+}
+
+#[derive(Clone, Debug)]
+pub enum ExprStmt {
+    Unary(UnaryNode),
+    Primary(Unary),
+    Binary(BinaryNode),
+}
+
+#[derive(Clone, Debug)]
+pub struct UnaryNode {
+    pub kind: NodeKind,
+    pub lhs: Unary,
+}
+
+#[derive(Clone, Debug)]
+pub enum Unary {
+    Num(usize),
+    Ident(String),
+    Expr(Box<ExprStmt>)
+}
+
+#[derive(Clone, Debug)]
+pub struct BinaryNode {
+    kind: NodeKind,
+    lhs: Box<ExprStmt>,
+    rhs: Box<ExprStmt>,
+}
+
+// TODO(chrde): the idea is to remove NodeKind, Node, and start using SuperNode Instead
+#[derive(Clone, Debug)]
+pub enum SuperNode {
+    Block(GroupId),
+    // Block1(BlockNode),
+    // Statement(StatementNode),
+    Assignment(AssignmentNode),
+    BinExpr(BinExprNode),
+    Num(usize),
+    Ident(NodeId),
+}
+
+#[derive(Clone, Debug)]
+pub struct BlockNode {
+    pub stmts: Vec<Statement>
+}
+
+// TODO(chrde): this represents a 'vec' of 'things'
+#[derive(Clone, Debug)]
+pub struct GroupId(usize);
+
+#[derive(Clone, Debug)]
+pub struct AssignmentNode {
+    lhs: NodeId,
+    rhs: NodeId,
+}
+
+#[derive(Clone, Debug)]
+pub struct BinExprNode {
+    operator: BinOp,
+    lhs: NodeId,
+    rhs: NodeId,
+}
+
+#[derive(Clone, Debug)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    EqCmp,
+    NeqCmp,
+    LowerCmp,
+    LowerEqCmp,
+    GreaterCmp,
+    GreaterEqCmp,
 }
 
 #[derive(Clone, Debug)]
@@ -312,9 +416,9 @@ pub struct NodeId(pub usize);
 const NIL: NodeId = NodeId(0);
 
 impl Node {
-    pub fn new(kind: NodeKind, lhs: NodeId, rhs: NodeId) -> Self {
-        Self { kind, lhs, rhs }
-    }
+    // fn new(kind: NodeKind, lhs: NodeId, rhs: NodeId) -> Self {
+    //     Self { kind, lhs, rhs }
+    // }
 
     pub fn lhs(&self) -> NodeId {
         self.lhs
@@ -328,7 +432,7 @@ impl Node {
         &self.kind
     }
 
-    pub fn ident(ident_id: NodeId) -> Self {
+    fn ident(ident_id: NodeId) -> Self {
         Self {
             kind: NodeKind::Ident(ident_id),
             lhs: NIL,
@@ -336,7 +440,7 @@ impl Node {
         }
     }
 
-    pub fn num(val: usize) -> Self {
+    fn num(val: usize) -> Self {
         Self {
             kind: NodeKind::Num(val),
             lhs: NIL,
@@ -344,7 +448,7 @@ impl Node {
         }
     }
 
-    pub fn unary(kind: NodeKind, lhs: NodeId) -> Self {
+    fn unary(kind: NodeKind, lhs: NodeId) -> Self {
         Self {
             kind,
             lhs,
@@ -352,7 +456,7 @@ impl Node {
         }
     }
 
-    pub fn binary(kind: NodeKind, lhs: NodeId, rhs: NodeId) -> Self {
+    fn binary(kind: NodeKind, lhs: NodeId, rhs: NodeId) -> Self {
         Self { kind, lhs, rhs }
     }
 }

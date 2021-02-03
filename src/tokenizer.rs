@@ -92,6 +92,14 @@ impl<'a> Tokenizer<'a> {
                 self.advance();
                 self.push_token(TokenKind::Slash);
             }
+            Some('}') => {
+                self.advance();
+                self.push_token(TokenKind::RightCurly);
+            }
+            Some('{') => {
+                self.advance();
+                self.push_token(TokenKind::LeftCurly);
+            }
             Some(')') => {
                 self.advance();
                 self.push_token(TokenKind::RightParen);
@@ -185,12 +193,14 @@ fn identifier(ident: &str) -> TokenKind {
 pub enum TokenKind {
     Num(usize),
     Ident(String),
+    LeftCurly,
     LeftParen,
     Star,
     Slash,
     Plus,
     Minus,
     RightParen,
+    RightCurly,
     Equal,
     EqualEqual,
     Not,
