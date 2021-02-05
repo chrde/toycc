@@ -1,6 +1,5 @@
 use crate::parser::{
-    Function, Node, NodeId,
-    NodeKind::{self, *},
+    BinOp, BinaryNode, ExprStmt, Expression, Function, LValue, LocalId, Statement, Unary, UnaryOp,
 };
 use std::fmt::{self, Write};
 
@@ -47,17 +46,7 @@ impl<'a> Assembly<'a> {
         self.writeln("  push %rbp");
         self.writeln("  mov %rsp, %rbp");
         writeln!(self.content, "  sub ${}, %rsp", self.func.stack_size()).unwrap();
-        for stmt in self.func.body() {
-            match stmt.kind() {
-                NodeKind::Statement => self.gen_expr(stmt.lhs()),
-                NodeKind::Return => {
-                    self.gen_expr(stmt.lhs());
-                    self.writeln("  jmp .L.return");
-                }
-                k => unreachable!("{:?}", k),
-            }
-        }
-
+        self.gen_stmts(self.func.body());
         self.writeln(".L.return:");
         self.writeln("  mov %rbp, %rsp");
         self.writeln("  pop %rbp");
@@ -65,96 +54,126 @@ impl<'a> Assembly<'a> {
         self.writeln("  ret");
     }
 
-    pub fn gen_addr(&mut self, node: &Node) {
-        match node.kind() {
-            NodeKind::Ident(l) => {
-                let l = self.func.local(*l);
-                writeln!(self.content, "  lea -{}(%rbp), %rax", l.offset()).unwrap();
+    pub fn gen_stmts(&mut self, stmts: &[Statement]) {
+        for stmt in stmts {
+            match stmt {
+                Statement::Expr(e) => self.gen_expr(&e),
+                Statement::Return(r) => {
+                    self.gen_expr(&r.lhs);
+                    self.writeln("  jmp .L.return");
+                }
+                Statement::Block(b) => self.gen_stmts(&b.stmts),
             }
-            k => unreachable!("{:?}", k),
         }
     }
 
-    pub fn recurse_expr(&mut self, node: &Node) {
-        self.gen_expr(node.rhs());
+    pub fn gen_addr(&mut self, local: LocalId) {
+        let l = self.func.local(local);
+        writeln!(self.content, "  lea -{}(%rbp), %rax", l.offset()).unwrap();
+    }
+
+    pub fn recurse_binary(&mut self, bin: &BinaryNode) {
+        self.gen_expr_stmt(&bin.rhs);
         self.push();
-        self.gen_expr(node.lhs());
+        self.gen_expr_stmt(&bin.lhs);
         self.pop("%rdi");
     }
 
-    pub fn gen_expr(&mut self, id: NodeId) {
-        let node = self.func.node(id);
-        match node.kind() {
-            Add => {
-                self.recurse_expr(node);
+    pub fn gen_unary(&mut self, u: &Unary) {
+        match u {
+            Unary::Num(n) => writeln!(self.content, "  mov ${}, %rax", n).unwrap(),
+            Unary::Ident(local) => {
+                self.gen_addr(*local);
+                self.writeln("  mov (%rax), %rax");
+            }
+            Unary::Expr(stmt) => self.gen_expr_stmt(stmt),
+        }
+    }
+
+    pub fn gen_binary(&mut self, node: &BinaryNode) {
+        match node.op {
+            BinOp::Add => {
+                self.recurse_binary(node);
                 self.writeln("  add %rdi, %rax")
             }
-            Sub => {
-                self.recurse_expr(node);
+            BinOp::Sub => {
+                self.recurse_binary(node);
                 self.writeln("  sub %rdi, %rax")
             }
-            Mul => {
-                self.recurse_expr(node);
+            BinOp::Mul => {
+                self.recurse_binary(node);
                 self.writeln("  imul %rdi, %rax")
             }
-            Div => {
-                self.recurse_expr(node);
+            BinOp::Div => {
+                self.recurse_binary(node);
                 self.writeln("  cqo");
                 self.writeln("  idiv %rdi");
             }
-            GreaterEqCmp => {
-                self.recurse_expr(node);
+            BinOp::GreaterEqCmp => {
+                self.recurse_binary(node);
                 self.writeln("  cmp %rdi, %rax");
                 self.writeln("  setge %al");
                 self.writeln("  movzb %al, %rax");
             }
-            LowerEqCmp => {
-                self.recurse_expr(node);
+            BinOp::LowerEqCmp => {
+                self.recurse_binary(node);
                 self.writeln("  cmp %rdi, %rax");
                 self.writeln("  setle %al");
                 self.writeln("  movzb %al, %rax");
             }
-            GreaterCmp => {
-                self.recurse_expr(node);
+            BinOp::GreaterCmp => {
+                self.recurse_binary(node);
                 self.writeln("  cmp %rdi, %rax");
                 self.writeln("  setg %al");
                 self.writeln("  movzb %al, %rax");
             }
-            LowerCmp => {
-                self.recurse_expr(node);
+            BinOp::LowerCmp => {
+                self.recurse_binary(node);
                 self.writeln("  cmp %rdi, %rax");
                 self.writeln("  setl %al");
                 self.writeln("  movzb %al, %rax");
             }
-            EqCmp => {
-                self.recurse_expr(node);
+            BinOp::EqCmp => {
+                self.recurse_binary(node);
                 self.writeln("  cmp %rdi, %rax");
                 self.writeln("  sete %al");
                 self.writeln("  movzb %al, %rax");
             }
-            NeqCmp => {
-                self.recurse_expr(node);
+            BinOp::NeqCmp => {
+                self.recurse_binary(node);
                 self.writeln("  cmp %rdi, %rax");
                 self.writeln("  setne %al");
                 self.writeln("  movzb %al, %rax");
             }
-            Neg => {
-                self.gen_expr(node.lhs());
-                self.writeln("  neg %rax");
-            }
-            Num(val) => writeln!(self.content, "  mov ${}, %rax", val).unwrap(),
-            Ident(_) => {
-                self.gen_addr(node);
-                self.writeln("  mov (%rax), %rax");
-            }
-            Assignment => {
-                self.gen_addr(self.func.node(node.lhs()));
+        }
+    }
+
+    pub fn gen_expr_stmt(&mut self, e: &ExprStmt) {
+        match e {
+            ExprStmt::Unary(u) => match u.op {
+                UnaryOp::Neg => {
+                    self.gen_unary(&u.lhs);
+                    self.writeln("  neg %rax");
+                }
+                UnaryOp::NoOp => self.gen_unary(&u.lhs),
+            },
+            ExprStmt::Primary(u) => self.gen_unary(u),
+            ExprStmt::Binary(b) => self.gen_binary(b),
+        }
+    }
+
+    pub fn gen_expr(&mut self, stmt: &Expression) {
+        match stmt {
+            Expression::Unary(e) => self.gen_expr_stmt(e),
+            Expression::Assignment(a) => {
+                match a.lhs {
+                    LValue::Ident(local) => self.gen_addr(local),
+                }
                 self.push();
-                self.gen_expr(node.rhs());
+                self.gen_expr(&a.rhs);
                 self.pop("%rdi");
                 self.writeln("  mov %rax, (%rdi)");
             }
-            k => unreachable!("{:?}", k),
         }
     }
 

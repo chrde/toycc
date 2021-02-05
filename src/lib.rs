@@ -1,6 +1,5 @@
 use codegen::Assembly;
-use parser::{Function, Local, Node, NodeId, SuperNode};
-use parser::{NodeKind, Parser};
+use parser::{Function, Parser};
 use std::{fmt, mem};
 use thiserror::Error;
 use tokenizer::Tokenizer;
@@ -47,75 +46,17 @@ impl Span {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct NodeArena {
-    nodes: Vec<Node>,
-    statements: Vec<Node>,
-    locals: Vec<Local>,
-    groups: Vec<Vec<SuperNode>>
-}
-
-impl NodeArena {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn push_local(&mut self, name: String) -> NodeId {
-        let id = match self.locals.iter().position(|x| x.name() == &name) {
-            Some(x) => x,
-            None => {
-                self.locals.push(Local::new(name));
-                self.locals.len() - 1
-            }
-        };
-        NodeId(id)
-    }
-
-    pub fn into_function(&mut self) -> Function {
-        Function::new(
-            mem::take(&mut self.statements),
-            mem::take(&mut self.nodes),
-            mem::take(&mut self.locals),
-        )
-    }
-
-    pub fn push(&mut self, node: Node) -> NodeId {
-        match node.kind() {
-            NodeKind::Statement | NodeKind::Return => {
-                self.statements.push(node);
-                NodeId(self.statements.len() - 1)
-            }
-            _ => {
-                self.nodes.push(node);
-                NodeId(self.nodes.len() - 1)
-            }
-        }
-    }
-
-    pub fn get(&self, node: NodeId) -> &Node {
-        &self.nodes[node.0]
-    }
-
-    pub fn statements(&self) -> &[Node] {
-        &self.statements
-    }
-}
-
 pub fn run<'a>(code: &'a str) -> Result<String, Error> {
     let t = Tokenizer::new(code);
     let tokens = t.run();
-    let mut arena = NodeArena::new();
-    let mut parser = Parser::new(code, tokens, &mut arena);
+    let mut parser = Parser::new(code, tokens);
 
     let program = parser.run()?;
+    let fun = Function::new(program.stmts, mem::take(&mut parser.locals));
     //assert parser is at EOF
 
-    let result = format!("{:#?}", program);
-    Ok(result)
-    // dbg!(&arena);
-    // let func = arena.into_function();
-    // let mut assembly = Assembly::new(&func);
-    // assembly.gen();
+    let mut assembly = Assembly::new(&fun);
+    assembly.gen();
 
-    // Ok(assembly.finish())
+    Ok(assembly.finish())
 }
