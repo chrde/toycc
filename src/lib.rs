@@ -4,6 +4,7 @@ use std::{fmt, mem};
 use thiserror::Error;
 use tokenizer::Tokenizer;
 
+mod ast;
 mod codegen;
 mod parser;
 mod tokenizer;
@@ -55,6 +56,7 @@ pub fn run<'a>(code: &'a str) -> Result<String, Error> {
     let fun = Function::new(program.stmts, mem::take(&mut parser.locals));
     //assert parser is at EOF
 
+    dbg!(&fun);
     let mut assembly = Assembly::new(&fun);
     assembly.gen();
 
