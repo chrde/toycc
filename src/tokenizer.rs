@@ -185,6 +185,8 @@ fn identifier(ident: &str) -> TokenKind {
     use TokenKind::*;
     match ident {
         "return" => Return,
+        "if" => If,
+        "else" => Else,
         i => Ident(i.to_string()),
     }
 }
@@ -214,6 +216,8 @@ pub enum TokenKind {
 
     // Reserved words,
     Return,
+    If,
+    Else,
 }
 
 impl TokenKind {

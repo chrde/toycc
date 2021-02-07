@@ -1,3 +1,4 @@
+use crate::ast::*;
 use crate::tokenizer::TokenKind;
 use crate::{tokenizer::Token, Error};
 
@@ -6,9 +7,6 @@ pub struct Parser<'a> {
     pub locals: Vec<Local>,
     tokens: Vec<Token>,
 }
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct LocalId(pub usize);
 
 impl<'a> Parser<'a> {
     pub fn new(code: &'a str, tokens: Vec<Token>) -> Self {
@@ -50,6 +48,15 @@ impl<'a> Parser<'a> {
         let next = self.next();
         assert_eq!(kind, next.kind);
         next
+    }
+
+    fn skip(&mut self, kind: TokenKind) -> bool {
+        if self.peek().kind == kind {
+            let _ = self.next();
+            true
+        } else {
+            false
+        }
     }
 
     fn consume_binary(&mut self) -> Token {
@@ -162,14 +169,36 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    // TODO(chrde): rename this
     fn expr(&mut self) -> Result<Expression, Error> {
-        let id = self.assignment()?;
+        self.assignment()
+    }
+
+    fn expr_stmt(&mut self) -> Result<Expression, Error> {
+        let id = self.expr()?;
+        self.consume(TokenKind::Semicolon);
         Ok(id)
     }
 
     fn statement(&mut self) -> Result<Statement, Error> {
         match self.peek().kind {
+            TokenKind::If => {
+                self.consume(TokenKind::If);
+                self.consume(TokenKind::LeftParen);
+                let cond = self.expr()?;
+                self.consume(TokenKind::RightParen);
+                let then_branch = Box::new(self.statement()?);
+                let else_branch = if self.skip(TokenKind::Else) {
+                    let res = Some(Box::new(self.statement()?));
+                    res
+                } else {
+                    None
+                };
+                Ok(Statement::If(IfStmt {
+                    cond,
+                    then_branch,
+                    else_branch,
+                }))
+            }
             TokenKind::Return => {
                 self.consume(TokenKind::Return);
                 let lhs = self.expr()?;
@@ -185,9 +214,16 @@ impl<'a> Parser<'a> {
                 self.consume(TokenKind::RightCurly);
                 Ok(Statement::Block(BlockNode { stmts }))
             }
+            TokenKind::Semicolon => {
+                loop {
+                    if !self.skip(TokenKind::Semicolon) {
+                        break;
+                    }
+                }
+                self.statement()
+            }
             _ => {
-                let expr = self.expr()?;
-                self.consume(TokenKind::Semicolon);
+                let expr = self.expr_stmt()?;
                 Ok(Statement::Expr(expr))
             }
         }
@@ -217,7 +253,6 @@ fn prefix_binding_power(t: &TokenKind) -> ((), u8) {
         TokenKind::Plus | TokenKind::Minus => ((), PREC_UNARY),
         t => unimplemented!("{:?}", t),
     }
-    // Some(res)
 }
 
 fn infix_binding_power(t: &TokenKind) -> Option<(u8, u8)> {
@@ -232,147 +267,6 @@ fn infix_binding_power(t: &TokenKind) -> Option<(u8, u8)> {
         _ => return None,
     };
     Some(res)
-}
-
-// #[derive(Clone, Debug, Eq, PartialEq)]
-// pub enum NodeKind {
-//     Statement,
-//     Block,
-
-//     Return,
-
-//     // expr
-//     NoOp,
-//     Add,
-//     Sub,
-//     Mul,
-//     Div,
-//     Neg,
-//     EqCmp,
-//     NeqCmp,
-//     LowerCmp,
-//     LowerEqCmp,
-//     GreaterCmp,
-//     GreaterEqCmp,
-
-//     // identifiers
-//     Num(usize),
-//     Ident(NodeId),
-// }
-
-#[derive(Clone, Debug, Default)]
-pub struct Program {
-    pub stmts: Vec<Statement>,
-}
-
-#[derive(Clone, Debug)]
-pub enum Statement {
-    Expr(Expression),
-    Return(ReturnStmt),
-    Block(BlockNode),
-}
-
-#[derive(Clone, Debug)]
-pub struct ReturnStmt {
-    pub lhs: Expression,
-}
-
-#[derive(Clone, Debug)]
-pub enum ExprStmt {
-    Unary(UnaryNode),
-    Primary(Unary),
-    Binary(BinaryNode),
-}
-
-#[derive(Clone, Debug)]
-pub struct UnaryNode {
-    pub op: UnaryOp,
-    pub lhs: Unary,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum UnaryOp {
-    Neg,
-    // TODO(chrde): this is a hack...
-    NoOp,
-}
-
-#[derive(Clone, Debug)]
-pub enum Unary {
-    Num(usize),
-    Ident(LocalId),
-    Expr(Box<ExprStmt>),
-}
-
-#[derive(Clone, Debug)]
-pub enum LValue {
-    Ident(LocalId),
-}
-
-#[derive(Clone, Debug)]
-pub struct BinaryNode {
-    pub op: BinOp,
-    pub lhs: Box<ExprStmt>,
-    pub rhs: Box<ExprStmt>,
-}
-
-#[derive(Clone, Debug)]
-pub struct BlockNode {
-    pub stmts: Vec<Statement>,
-}
-
-#[derive(Clone, Debug)]
-pub enum Expression {
-    Assignment(AssignmentNode),
-    Unary(ExprStmt),
-}
-
-#[derive(Clone, Debug)]
-pub struct AssignmentNode {
-    pub lhs: LValue,
-    pub rhs: Box<Expression>,
-}
-
-#[derive(Clone, Debug)]
-pub enum BinOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    EqCmp,
-    NeqCmp,
-    LowerCmp,
-    LowerEqCmp,
-    GreaterCmp,
-    GreaterEqCmp,
-}
-
-#[derive(Clone, Debug)]
-pub struct Local {
-    name: String,
-    offset: usize,
-}
-
-impl Local {
-    pub fn new(name: String) -> Self {
-        Self { name, offset: 0 }
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn offset(&self) -> usize {
-        self.offset
-    }
-}
-
-impl Eq for Local {}
-
-impl PartialEq for Local {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
 }
 
 #[derive(Clone, Debug)]

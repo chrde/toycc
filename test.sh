@@ -88,6 +88,14 @@ assert 2 '{ 1; return 2; 3; }'
 assert 3 '{ 1; 2; return 3; }'
 
 assert 3 '{ {1; {2;} return 3;} }'
+assert 5 '{ ;;; return 5; }'
+
+assert 3 '{ if (0) return 2; return 3; }'
+assert 3 '{ if (1-1) return 2; return 3; }'
+assert 2 '{ if (1) return 2; return 3; }'
+assert 2 '{ if (2-1) return 2; return 3; }'
+assert 4 '{ if (0) { 1; 2; return 3; } else { return 4; } }'
+assert 3 '{ if (1) { 1; 2; return 3; } else { 1; return 4; 3; } }'
 # assert_err $'error: `expected number`\n12 + 34 - 5 - -\n               ^' '12 + 34 - 5 - -'
 
 echo OK

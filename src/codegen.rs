@@ -1,9 +1,8 @@
-use crate::parser::{
-    BinOp, BinaryNode, ExprStmt, Expression, Function, LValue, LocalId, Statement, Unary, UnaryOp,
-};
+use crate::{ast::*, parser::Function};
 use std::fmt::{self, Write};
 
 pub struct Assembly<'a> {
+    counter: usize,
     depth: usize,
     content: String,
     func: &'a Function,
@@ -18,6 +17,7 @@ impl fmt::Display for Assembly<'_> {
 impl<'a> Assembly<'a> {
     pub fn new(func: &'a Function) -> Self {
         Self {
+            counter: 0,
             depth: 0,
             content: String::new(),
             func,
@@ -39,6 +39,11 @@ impl<'a> Assembly<'a> {
         self.depth -= 1;
     }
 
+    fn count_inc(&mut self) -> usize {
+        self.counter += 1;
+        self.counter
+    }
+
     pub fn gen(&mut self) {
         self.writeln("  .globl main");
         self.writeln("main:");
@@ -46,7 +51,9 @@ impl<'a> Assembly<'a> {
         self.writeln("  push %rbp");
         self.writeln("  mov %rsp, %rbp");
         writeln!(self.content, "  sub ${}, %rsp", self.func.stack_size()).unwrap();
-        self.gen_stmts(self.func.body());
+        for stmt in self.func.body() {
+            self.gen_stmt(stmt);
+        }
         self.writeln(".L.return:");
         self.writeln("  mov %rbp, %rsp");
         self.writeln("  pop %rbp");
@@ -54,15 +61,30 @@ impl<'a> Assembly<'a> {
         self.writeln("  ret");
     }
 
-    pub fn gen_stmts(&mut self, stmts: &[Statement]) {
-        for stmt in stmts {
-            match stmt {
-                Statement::Expr(e) => self.gen_expr(&e),
-                Statement::Return(r) => {
-                    self.gen_expr(&r.lhs);
-                    self.writeln("  jmp .L.return");
+    pub fn gen_stmt(&mut self, stmt: &Statement) {
+        match stmt {
+            Statement::Expr(e) => self.gen_expr(&e),
+            Statement::Return(r) => {
+                self.gen_expr(&r.lhs);
+                self.writeln("  jmp .L.return");
+            }
+            Statement::Block(b) => {
+                for stmt in &b.stmts {
+                    self.gen_stmt(&stmt);
                 }
-                Statement::Block(b) => self.gen_stmts(&b.stmts),
+            }
+            Statement::If(i) => {
+                self.gen_expr(&i.cond);
+                self.writeln("  cmp $0, %rax");
+                let count = self.count_inc();
+                writeln!(self.content, "  je .L.else.{}", count).unwrap();
+                self.gen_stmt(&i.then_branch);
+                writeln!(self.content, "  jmp .L.end.{}", count).unwrap();
+                writeln!(self.content, ".L.else.{}:", count).unwrap();
+                if let Some(e) = &i.else_branch {
+                    self.gen_stmt(e);
+                }
+                writeln!(self.content, ".L.end.{}:", count).unwrap();
             }
         }
     }
