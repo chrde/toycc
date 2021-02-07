@@ -9,6 +9,15 @@ pub enum Statement {
     Return(ReturnStmt),
     Block(BlockNode),
     If(IfStmt),
+    For(ForStmt),
+}
+
+#[derive(Clone, Debug)]
+pub struct ForStmt {
+    pub init: Option<Expression>,
+    pub cond: Option<Expression>,
+    pub inc: Option<Expression>,
+    pub body: Box<Statement>,
 }
 
 #[derive(Clone, Debug)]

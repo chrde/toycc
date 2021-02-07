@@ -181,6 +181,47 @@ impl<'a> Parser<'a> {
 
     fn statement(&mut self) -> Result<Statement, Error> {
         match self.peek().kind {
+            TokenKind::While => {
+                self.consume(TokenKind::While);
+                self.consume(TokenKind::LeftParen);
+                let cond = Some(self.expr()?);
+                self.consume(TokenKind::RightParen);
+                let body = Box::new(self.statement()?);
+                Ok(Statement::For(ForStmt {
+                    init: None,
+                    inc: None,
+                    cond,
+                    body,
+                }))
+            }
+            TokenKind::For => {
+                self.consume(TokenKind::For);
+                self.consume(TokenKind::LeftParen);
+                let init = if self.skip(TokenKind::Semicolon) {
+                    None
+                } else {
+                    Some(self.expr_stmt()?)
+                };
+                let cond = if self.skip(TokenKind::Semicolon) {
+                    None
+                } else {
+                    Some(self.expr_stmt()?)
+                };
+                let inc = if self.skip(TokenKind::RightParen) {
+                    None
+                } else {
+                    let inc = Some(self.expr()?);
+                    self.consume(TokenKind::RightParen);
+                    inc
+                };
+                let body = Box::new(self.statement()?);
+                Ok(Statement::For(ForStmt {
+                    init,
+                    cond,
+                    inc,
+                    body,
+                }))
+            }
             TokenKind::If => {
                 self.consume(TokenKind::If);
                 self.consume(TokenKind::LeftParen);

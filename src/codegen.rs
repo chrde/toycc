@@ -86,6 +86,24 @@ impl<'a> Assembly<'a> {
                 }
                 writeln!(self.content, ".L.end.{}:", count).unwrap();
             }
+            Statement::For(f) => {
+                if let Some(e) = &f.init {
+                    self.gen_expr(e);
+                }
+                let count = self.count_inc();
+                writeln!(self.content, ".L.begin.{}:", count).unwrap();
+                if let Some(e) = &f.cond {
+                    self.gen_expr(e);
+                    self.writeln("  cmp $0, %rax");
+                    writeln!(self.content, "  je .L.end.{}", count).unwrap();
+                }
+                self.gen_stmt(&f.body);
+                if let Some(e) = &f.inc {
+                    self.gen_expr(e);
+                }
+                writeln!(self.content, "  jmp .L.begin.{}", count).unwrap();
+                writeln!(self.content, ".L.end.{}:", count).unwrap();
+            }
         }
     }
 

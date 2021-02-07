@@ -187,6 +187,8 @@ fn identifier(ident: &str) -> TokenKind {
         "return" => Return,
         "if" => If,
         "else" => Else,
+        "for" => For,
+        "while" => While,
         i => Ident(i.to_string()),
     }
 }
@@ -218,6 +220,8 @@ pub enum TokenKind {
     Return,
     If,
     Else,
+    For,
+    While,
 }
 
 impl TokenKind {

@@ -56,7 +56,7 @@ pub fn run<'a>(code: &'a str) -> Result<String, Error> {
     let fun = Function::new(program.stmts, mem::take(&mut parser.locals));
     //assert parser is at EOF
 
-    dbg!(&fun);
+    // dbg!(&fun);
     let mut assembly = Assembly::new(&fun);
     assembly.gen();
 
