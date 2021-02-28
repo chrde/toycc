@@ -92,6 +92,10 @@ impl<'a> Tokenizer<'a> {
                 self.advance();
                 self.push_token(TokenKind::Slash);
             }
+            Some('&') => {
+                self.advance();
+                self.push_token(TokenKind::Amp);
+            }
             Some('}') => {
                 self.advance();
                 self.push_token(TokenKind::RightCurly);
@@ -203,6 +207,7 @@ pub enum TokenKind {
     Slash,
     Plus,
     Minus,
+    Amp,
     RightParen,
     RightCurly,
     Equal,

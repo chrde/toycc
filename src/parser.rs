@@ -1,5 +1,6 @@
 use crate::ast::*;
 use crate::tokenizer::TokenKind;
+use crate::tokenizer::TokenKind::*;
 use crate::{tokenizer::Token, Error};
 
 pub struct Parser<'a> {
@@ -65,7 +66,7 @@ impl<'a> Parser<'a> {
         next
     }
 
-    fn binary(&mut self, lhs: ExprStmt, min_bp: u8) -> Result<ExprStmt, Error> {
+    fn binary(&mut self, lhs: Expression, min_bp: u8) -> Result<Expression, Error> {
         let op = match self.consume_binary().kind {
             TokenKind::Lower => BinOp::LowerCmp,
             TokenKind::LowerEqual => BinOp::LowerEqCmp,
@@ -80,7 +81,7 @@ impl<'a> Parser<'a> {
             k => unimplemented!("{:?}", k),
         };
         let rhs = self.expression(min_bp)?;
-        Ok(ExprStmt::Binary(BinaryNode {
+        Ok(Expression::Binary(BinaryExpr {
             op,
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
@@ -88,109 +89,141 @@ impl<'a> Parser<'a> {
     }
 
     // parens
-    fn grouping(&mut self) -> Result<ExprStmt, Error> {
+    fn grouping(&mut self) -> Result<Expression, Error> {
         self.consume(TokenKind::LeftParen);
         let expr = self.expression(0)?;
         self.consume(TokenKind::RightParen);
         Ok(expr)
     }
 
-    fn primary(&mut self) -> Result<ExprStmt, Error> {
-        let t = self.next();
-        match t.kind {
-            TokenKind::Num(val) => Ok(ExprStmt::Primary(Unary::Num(val))),
-            TokenKind::Ident(name) => Ok(ExprStmt::Primary(Unary::Ident(self.push_local(name)))),
-            k => unimplemented!("{:?}", k),
-        }
-    }
+    // fn primary(&mut self) -> Result<PrimaryNode, Error> {
+    //     let t = self.next();
+    //     match t.kind {
+    //         TokenKind::Num(val) => Ok(PrimaryNode::Num(val)),
+    //         TokenKind::Ident(name) => Ok(PrimaryNode::Ident(self.push_local(name))),
+    //         k => unimplemented!("{:?}", k),
+    //     }
+    // }
 
     // unary
-    fn unary(&mut self) -> Result<UnaryNode, Error> {
+    fn unary(&mut self) -> Result<Expression, Error> {
         let t = self.next();
         let ((), r_bp) = prefix_binding_power(&t.kind);
         let lhs = self.expression(r_bp)?;
-        let id = match &t.kind {
-            TokenKind::Plus => UnaryNode {
+        let e = match &t.kind {
+            TokenKind::Plus => Expression::Unary(UnaryExpr {
                 op: UnaryOp::NoOp,
-                lhs: Unary::Expr(Box::new(lhs)),
-            },
-            TokenKind::Minus => UnaryNode {
+                lhs: Box::new(lhs),
+            }),
+            TokenKind::Minus => Expression::Unary(UnaryExpr {
                 op: UnaryOp::Neg,
-                lhs: Unary::Expr(Box::new(lhs)),
-            },
+                lhs: Box::new(lhs),
+            }),
+            TokenKind::Amp => Expression::Pointer(PointerExpr {
+                op: PointerOp::Ref,
+                arg: Box::new(lhs),
+            }),
+            TokenKind::Star => Expression::Pointer(PointerExpr {
+                op: PointerOp::Deref,
+                arg: Box::new(lhs),
+            }),
             k => unimplemented!("{:?}", k),
         };
-        Ok(id)
+        Ok(e)
     }
 
-    pub fn expression(&mut self, min_bp: u8) -> Result<ExprStmt, Error> {
-        use crate::tokenizer::TokenKind::*;
+    fn assignment(&mut self, lhs: Expression, min_bp: u8) -> Result<Expression, Error> {
+        // let mut lhs = Expression::Unary(self.expression(0)?);
+        let op = match self.next().kind {
+            TokenKind::Equal => AssignmentOp::Eq,
+            k => unimplemented!("{:?}", k),
+        };
+
+        let rhs = self.expression(min_bp)?;
+        Ok(Expression::Assignment(AssignmentExpr {
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            op
+        }))
+
+        // while self.peek().kind == TokenKind::Equal {
+        //     let lvalue = if let Expression::Unary(ExprStmt::Primary(PrimaryNode::Ident(local))) = lhs {
+        //         LValue::Ident(local)
+        //     } else {
+        //         panic!("wrong LValue for an assignment: {:?}", lhs);
+        //     };
+        //     self.consume(TokenKind::Equal);
+        //     lhs = Expression::Assignment(AssignmentNode {
+        //         lhs: lvalue,
+        //         rhs: Box::new(self.assignment()?),
+        //     })
+        // }
+        // Ok(lhs)
+    }
+
+    pub fn expression(&mut self, min_bp: u8) -> Result<Expression, Error> {
         let mut lhs = match self.peek().kind {
-            Num(_) | Ident(_) => self.primary()?,
+            Num(v) => {
+                self.next();
+                Expression::NumberLiteral(v)
+            }
+            Ident(i) => {
+                self.next();
+                Expression::Identifier(self.push_local(i))
+            }
+    //         Num(_) | Ident(_) => ExprStmt::Primary(self.primary()?),
             LeftParen => self.grouping()?,
-            Plus | Minus => ExprStmt::Unary(self.unary()?),
+            Plus | Minus | Star | Amp => self.unary()?,
             k => unimplemented!("{:?}", k),
         };
 
         loop {
             let next = self.peek().kind;
-            match next {
-                Eof | RightParen | Semicolon | Equal => break,
-                Star | Slash | Plus | Minus | EqualEqual | NotEqual | Lower | Greater
-                | LowerEqual | GreaterEqual => {}
-                k => unimplemented!("{:?}", k),
-            };
+    //         match next {
+    //             Eof | RightParen | Semicolon | Equal => break,
+    //             Star | Slash | Plus | Minus | EqualEqual | NotEqual | Lower | Greater
+    //             | LowerEqual | GreaterEqual => {}
+    //             k => unimplemented!("{:?}", k),
+    //         };
             if let Some((l_bp, r_bp)) = infix_binding_power(&next) {
                 if l_bp < min_bp {
                     break;
                 }
-                lhs = self.binary(lhs, r_bp)?;
+                lhs = match next {
+                    Equal => self.assignment(lhs, r_bp)?,
+                    _ => self.binary(lhs, r_bp)?,
+                };
+                // if next.binary() {
+                //     lhs = self.binary(lhs, r_bp)?;
+                // }
+            } else {
+                break;
             }
         }
 
         Ok(lhs)
     }
 
-    fn assignment(&mut self) -> Result<Expression, Error> {
-        // TODO(chrde): somehow, this must be a variable
-        let mut lhs = Expression::Unary(self.expression(0)?);
-        while self.peek().kind == TokenKind::Equal {
-            let lvalue = if let Expression::Unary(ExprStmt::Primary(Unary::Ident(local))) = lhs {
-                LValue::Ident(local)
-            } else {
-                panic!("wrong LValue for an assignment: {:?}", lhs);
-            };
-            self.consume(TokenKind::Equal);
-            lhs = Expression::Assignment(AssignmentNode {
-                lhs: lvalue,
-                rhs: Box::new(self.assignment()?),
-            })
-        }
-        Ok(lhs)
-    }
+    // fn expr(&mut self) -> Result<Expression, Error> {
+    //     self.assignment()
+    // }
 
-    fn expr(&mut self) -> Result<Expression, Error> {
-        self.assignment()
-    }
-
-    fn expr_stmt(&mut self) -> Result<Expression, Error> {
-        let id = self.expr()?;
-        self.consume(TokenKind::Semicolon);
-        Ok(id)
-    }
+    // fn expr_stmt(&mut self) -> Result<Expression, Error> {
+    //     let id = self.expr()?;
+    //     self.consume(TokenKind::Semicolon);
+    //     Ok(id)
+    // }
 
     fn statement(&mut self) -> Result<Statement, Error> {
         match self.peek().kind {
             TokenKind::While => {
                 self.consume(TokenKind::While);
                 self.consume(TokenKind::LeftParen);
-                let cond = Some(self.expr()?);
+                let condition = Some(self.expression(0)?);
                 self.consume(TokenKind::RightParen);
                 let body = Box::new(self.statement()?);
-                Ok(Statement::For(ForStmt {
-                    init: None,
-                    inc: None,
-                    cond,
+                Ok(Statement::While(WhileStatement {
+                    condition,
                     body,
                 }))
             }
@@ -200,32 +233,36 @@ impl<'a> Parser<'a> {
                 let init = if self.skip(TokenKind::Semicolon) {
                     None
                 } else {
-                    Some(self.expr_stmt()?)
+                    let init = Some(self.expression(0)?);
+                    self.consume(TokenKind::Semicolon);
+                    init
                 };
-                let cond = if self.skip(TokenKind::Semicolon) {
+                let condition = if self.skip(TokenKind::Semicolon) {
                     None
                 } else {
-                    Some(self.expr_stmt()?)
+                    let condition = Some(self.expression(0)?);
+                    self.consume(TokenKind::Semicolon);
+                    condition
                 };
-                let inc = if self.skip(TokenKind::RightParen) {
+                let update = if self.skip(TokenKind::RightParen) {
                     None
                 } else {
-                    let inc = Some(self.expr()?);
+                    let update = Some(self.expression(0)?);
                     self.consume(TokenKind::RightParen);
-                    inc
+                    update
                 };
                 let body = Box::new(self.statement()?);
-                Ok(Statement::For(ForStmt {
+                Ok(Statement::For(ForStatement {
                     init,
-                    cond,
-                    inc,
+                    condition,
+                    update,
                     body,
                 }))
             }
             TokenKind::If => {
                 self.consume(TokenKind::If);
                 self.consume(TokenKind::LeftParen);
-                let cond = self.expr()?;
+                let condition = self.expression(0)?;
                 self.consume(TokenKind::RightParen);
                 let then_branch = Box::new(self.statement()?);
                 let else_branch = if self.skip(TokenKind::Else) {
@@ -234,17 +271,17 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
-                Ok(Statement::If(IfStmt {
-                    cond,
+                Ok(Statement::If(IfStatement {
+                    condition,
                     then_branch,
                     else_branch,
                 }))
             }
             TokenKind::Return => {
                 self.consume(TokenKind::Return);
-                let lhs = self.expr()?;
+                let lhs = self.expression(0)?;
                 self.consume(TokenKind::Semicolon);
-                Ok(Statement::Return(ReturnStmt { lhs }))
+                Ok(Statement::Return(lhs))
             }
             TokenKind::LeftCurly => {
                 let mut stmts = vec![];
@@ -253,7 +290,7 @@ impl<'a> Parser<'a> {
                     stmts.push(self.statement()?);
                 }
                 self.consume(TokenKind::RightCurly);
-                Ok(Statement::Block(BlockNode { stmts }))
+                Ok(Statement::Compound(CompoundStatement { stmts }))
             }
             TokenKind::Semicolon => {
                 loop {
@@ -261,21 +298,25 @@ impl<'a> Parser<'a> {
                         break;
                     }
                 }
-                self.statement()
+                Ok(Statement::Empty)
             }
             _ => {
-                let expr = self.expr_stmt()?;
-                Ok(Statement::Expr(expr))
+                    let lhs = self.expression(0)?;
+                    self.consume(TokenKind::Semicolon);
+                    Ok(Statement::Expr(lhs))
             }
         }
     }
 
     pub fn run(&mut self) -> Result<Program, Error> {
         let mut program = Program::default();
-        while self.peek().kind != TokenKind::Eof {
+        self.consume(TokenKind::LeftCurly);
+        while self.peek().kind != TokenKind::RightCurly {
             let statement = self.statement()?;
-            program.stmts.push(statement);
+            program.stmt.stmts.push(statement);
         }
+        self.consume(TokenKind::RightCurly);
+        self.consume(TokenKind::Eof);
 
         Ok(program)
     }
@@ -291,7 +332,7 @@ const PREC_ASSIGNMENT: u8 = TOTAL - 14;
 
 fn prefix_binding_power(t: &TokenKind) -> ((), u8) {
     match t {
-        TokenKind::Plus | TokenKind::Minus => ((), PREC_UNARY),
+        TokenKind::Plus | TokenKind::Minus | TokenKind::Star | TokenKind::Amp => ((), PREC_UNARY),
         t => unimplemented!("{:?}", t),
     }
 }
@@ -312,15 +353,15 @@ fn infix_binding_power(t: &TokenKind) -> Option<(u8, u8)> {
 
 #[derive(Clone, Debug)]
 pub struct Function {
-    stmts: Vec<Statement>,
-    locals: Vec<Local>,
+    stmt: CompoundStatement,
+    pub locals: Vec<Local>,
     stack_size: usize,
 }
 
 impl Function {
-    pub fn new(stmts: Vec<Statement>, locals: Vec<Local>) -> Self {
+    pub fn new(program: Program, locals: Vec<Local>) -> Self {
         let mut result = Self {
-            stmts,
+            stmt: program.stmt,
             locals,
             stack_size: 0,
         };
@@ -332,8 +373,8 @@ impl Function {
         self.stack_size
     }
 
-    pub fn body(&self) -> &[Statement] {
-        &self.stmts
+    pub fn body(&self) -> &CompoundStatement {
+        &self.stmt
     }
 
     pub fn local(&self, id: LocalId) -> &Local {
@@ -342,7 +383,7 @@ impl Function {
 
     fn assign_locals_offsets(&mut self) {
         let mut total = 0;
-        for l in self.locals.iter_mut() {
+        for l in self.locals.iter_mut().rev() {
             total += 8;
             l.offset = total;
         }

@@ -53,11 +53,13 @@ pub fn run<'a>(code: &'a str) -> Result<String, Error> {
     let mut parser = Parser::new(code, tokens);
 
     let program = parser.run()?;
-    let fun = Function::new(program.stmts, mem::take(&mut parser.locals));
+    eprintln!("{}\n{:#?}", code, program);
+    let fun = Function::new(program, mem::take(&mut parser.locals));
     //assert parser is at EOF
 
-    // dbg!(&fun);
+    dbg!(&fun.locals);
     let mut assembly = Assembly::new(&fun);
+    // Ok("".to_string())
     assembly.gen();
 
     Ok(assembly.finish())
